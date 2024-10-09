@@ -1,63 +1,61 @@
-# server/app.py
-from flask import Flask, make_response
-from flask_migrate import Migrate
+# server/models.py
 
-from models import db, Zookeeper, Enclosure, Animal
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import MetaData
+from sqlalchemy_serializer import SerializerMixin
 
-app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
 
-migrate = Migrate(app, db)
+metadata = MetaData(naming_convention=convention)
 
-db.init_app(app)
-
-
-@app.route('/')
-def index():
-    return '<h1>Zoo app</h1>'
-
-
-@app.route('/animal/<int:id>')
-def animal_by_id(id):
-    animal = Animal.query.filter(Animal.id == id).first()
-    response_body = f''
-    response_body += f'<ul>ID: {animal.id}</ul>'
-    response_body += f'<ul>Name: {animal.name}</ul>'
-    response_body += f'<ul>Species: {animal.species}</ul>'
-    response_body += f'<ul>Zookeeper: {animal.zookeeper.name}</ul>'
-    response_body += f'<ul>Enclosure: {animal.enclosure.environment}</ul>'
-
-    return make_response(response_body)
+db = SQLAlchemy(metadata=metadata)
 
 
-@app.route('/zookeeper/<int:id>')
-def zookeeper_by_id(id):
-    zookeeper = Zookeeper.query.filter(Zookeeper.id == id).first()
-    response_body = f''
-    response_body += f'<ul>ID: {zookeeper.id}</ul>'
-    response_body += f'<ul>Name: {zookeeper.name}</ul>'
-    response_body += f'<ul>Birthday: {zookeeper.birthday}</ul>'
+class Zookeeper(db.Model, SerializerMixin):
+    __tablename__ = 'zookeepers'
 
-    for animal in zookeeper.animals:
-        response_body += f'<ul>Animal: {animal.name}</ul>'
+    # don't forget that every tuple needs at least one comma!
+    serialize_rules = ('-animals.zookeeper',)
 
-    return make_response(response_body)
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, unique=True)
+    birthday = db.Column(db.Date)
 
-
-@app.route('/enclosure/<int:id>')
-def enclosure_by_id(id):
-    enclosure = Enclosure.query.filter(Enclosure.id == id).first()
-    response_body = f''
-    response_body += f'<ul>ID: {enclosure.id}</ul>'
-    response_body += f'<ul>Environment: {enclosure.environment}</ul>'
-    response_body += f'<ul>Open to Visitors: {enclosure.open_to_visitors}</ul>'
-
-    for animal in enclosure.animals:
-        response_body += f'<ul>Animal: {animal.name}</ul>'
-
-    return make_response(response_body)
+    animals = db.relationship('Animal', back_populates='zookeeper')
 
 
-if __name__ == '__main__':
-    app.run(port=5555, debug=True)
+class Enclosure(db.Model, SerializerMixin):
+    __tablename__ = 'enclosures'
+
+    serialize_rules = ('-animals.enclosure',)
+
+    id = db.Column(db.Integer, primary_key=True)
+    environment = db.Column(db.String)
+    open_to_visitors = db.Column(db.Boolean)
+
+    animals = db.relationship('Animal', back_populates='enclosure')
+
+
+class Animal(db.Model, SerializerMixin):
+    __tablename__ = 'animals'
+
+    serialize_rules = ('-zookeeper.animals', '-enclosure.animals',)
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String, unique=True)
+    species = db.Column(db.String)
+
+    zookeeper_id = db.Column(db.Integer, db.ForeignKey('zookeepers.id'))
+    enclosure_id = db.Column(db.Integer, db.ForeignKey('enclosures.id'))
+
+    enclosure = db.relationship('Enclosure', back_populates='animals')
+    zookeeper = db.relationship('Zookeeper', back_populates='animals')
+
+    def __repr__(self):
+        return f'<Animal {self.name}, a {self.species}>'
